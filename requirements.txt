@@ -1,7 +1,13 @@
-# DocuMind Dependencies - Session 3
+# DocuMind Dependencies - Session 4
 
 # Core
 python-dotenv>=1.0.0
+
+# Database (Session 4)
+supabase>=2.0.0
+
+# MCP Server (Session 4)
+fastmcp>=0.3.0
 
 # Testing
 pytest>=7.4.0
@@ -11,8 +17,7 @@ pytest-cov>=4.1.0
 black>=23.0.0
 isort>=5.12.0
 
-# Session 4+ Dependencies (uncomment as needed)
-# supabase>=2.0.0          # Session 4
+# Session 5+ Dependencies (uncomment as needed)
 # openai>=1.0.0            # Session 5
 # PyPDF2>=3.0.0            # Session 7
 # pdfplumber>=0.10.0       # Session 7

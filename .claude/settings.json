@@ -1,35 +1,26 @@
 {
-  "hooks": {
-    "SessionStart": [
-      {
-        "matcher": "startup",
-        "hooks": [
-          {
-            "type": "command",
-            "command": ".claude/hooks/SessionStart.sh"
-          }
-        ]
+  "features": {
+    "skills": {
+      "enabled": true
+    },
+    "hooks": {
+      "enabled": true
+    },
+    "subagents": {
+      "enabled": true
+    },
+    "mcp": {
+      "enabled": true
+    }
+  },
+  "mcpServers": {
+    "documind-mcp": {
+      "command": "python",
+      "args": ["-m", "src.mcp.server"],
+      "env": {
+        "SUPABASE_URL": "${SUPABASE_URL}",
+        "SUPABASE_SERVICE_KEY": "${SUPABASE_SERVICE_KEY}"
       }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": ".claude/hooks/UserPromptSubmit.sh"
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": ".claude/hooks/Stop.sh"
-          }
-        ]
-      }
-    ]
+    }
   }
 }

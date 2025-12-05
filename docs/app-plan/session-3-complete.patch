@@ -1,0 +1,1871 @@
+From 04a04d5c765fe94070bb6cbfbe3342d7a0155b92 Mon Sep 17 00:00:00 2001
+From: mamd69 <mark@heroforge.ai>
+Date: Mon, 1 Dec 2025 22:11:24 +0000
+Subject: [PATCH] Session 3: Skills, Subagents, Hooks foundation
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Features implemented:
+- Document Processor Skill (.claude/skills/document-processor.md)
+- Summarizer Subagent (.claude/subagents/summarizer.md)
+- Pre-commit Format Hook (.claude/hooks/pre-commit-format.sh)
+- OpenRouter multi-model client (src/documind/openrouter.py)
+- Document processor module (src/documind/document_processor.py)
+- Sample documents for testing
+- Test suite for all new modules
+
+This branch represents the completed state after Session 3 demos.
+Students can use this as a reference for their workshop.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+---
+ .claude/hooks/pre-commit-format.sh            |  87 +++++
+ .claude/skills/document-processor.md          | 131 +++++++
+ .claude/subagents/summarizer.md               | 130 +++++++
+ docs/sample-docs/company-vacation-policy.md   |  97 +++++
+ .../engineering-deployment-guide.md           | 198 ++++++++++
+ requirements.txt                              |  24 ++
+ src/documind/__init__.py                      |  27 +-
+ src/documind/document_processor.py            | 350 ++++++++++++++++++
+ src/documind/openrouter.py                    | 302 +++++++++++++++
+ tests/test_document_processor.py              | 224 +++++++++++
+ tests/test_openrouter.py                      | 180 +++++++++
+ 11 files changed, 1749 insertions(+), 1 deletion(-)
+ create mode 100755 .claude/hooks/pre-commit-format.sh
+ create mode 100644 .claude/skills/document-processor.md
+ create mode 100644 .claude/subagents/summarizer.md
+ create mode 100644 docs/sample-docs/company-vacation-policy.md
+ create mode 100644 docs/sample-docs/engineering-deployment-guide.md
+ create mode 100644 requirements.txt
+ create mode 100644 src/documind/document_processor.py
+ create mode 100644 src/documind/openrouter.py
+ create mode 100644 tests/test_document_processor.py
+ create mode 100644 tests/test_openrouter.py
+
+diff --git a/.claude/hooks/pre-commit-format.sh b/.claude/hooks/pre-commit-format.sh
+new file mode 100755
+index 0000000..4d183fb
+--- /dev/null
++++ b/.claude/hooks/pre-commit-format.sh
+@@ -0,0 +1,87 @@
++#!/bin/bash
++# DocuMind Pre-Commit Format Hook
++# Automatically formats files before commit
++#
++# Session 3: Skills, Subagents, Hooks
++# This hook demonstrates Claude Code hook automation
++
++set -e
++
++# Colors for output
++RED='\033[0;31m'
++GREEN='\033[0;32m'
++YELLOW='\033[1;33m'
++NC='\033[0m' # No Color
++
++echo -e "${YELLOW}[DocuMind] Running pre-commit formatting...${NC}"
++
++# Get list of staged files
++STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null || echo "")
++
++if [ -z "$STAGED_FILES" ]; then
++    echo -e "${GREEN}[DocuMind] No staged files to format${NC}"
++    exit 0
++fi
++
++# Track if any files were modified
++FILES_MODIFIED=0
++
++# Format Python files with black (if available)
++PYTHON_FILES=$(echo "$STAGED_FILES" | grep -E '\.py$' || true)
++if [ -n "$PYTHON_FILES" ]; then
++    if command -v black &> /dev/null; then
++        echo -e "${YELLOW}[DocuMind] Formatting Python files with black...${NC}"
++        echo "$PYTHON_FILES" | xargs black --quiet 2>/dev/null || true
++        FILES_MODIFIED=1
++    else
++        echo -e "${YELLOW}[DocuMind] black not installed, skipping Python formatting${NC}"
++    fi
++fi
++
++# Format JavaScript/TypeScript files with prettier (if available)
++JS_FILES=$(echo "$STAGED_FILES" | grep -E '\.(js|ts|jsx|tsx)$' || true)
++if [ -n "$JS_FILES" ]; then
++    if command -v prettier &> /dev/null; then
++        echo -e "${YELLOW}[DocuMind] Formatting JS/TS files with prettier...${NC}"
++        echo "$JS_FILES" | xargs prettier --write --log-level error 2>/dev/null || true
++        FILES_MODIFIED=1
++    else
++        echo -e "${YELLOW}[DocuMind] prettier not installed, skipping JS/TS formatting${NC}"
++    fi
++fi
++
++# Format JSON files with prettier (if available)
++JSON_FILES=$(echo "$STAGED_FILES" | grep -E '\.json$' || true)
++if [ -n "$JSON_FILES" ]; then
++    if command -v prettier &> /dev/null; then
++        echo -e "${YELLOW}[DocuMind] Formatting JSON files with prettier...${NC}"
++        echo "$JSON_FILES" | xargs prettier --write --log-level error 2>/dev/null || true
++        FILES_MODIFIED=1
++    fi
++fi
++
++# Clean up Markdown files
++MD_FILES=$(echo "$STAGED_FILES" | grep -E '\.md$' || true)
++if [ -n "$MD_FILES" ]; then
++    echo -e "${YELLOW}[DocuMind] Cleaning up Markdown files...${NC}"
++    for file in $MD_FILES; do
++        if [ -f "$file" ]; then
++            # Remove trailing whitespace
++            sed -i 's/[[:space:]]*$//' "$file" 2>/dev/null || true
++            # Ensure file ends with newline
++            if [ -n "$(tail -c 1 "$file")" ]; then
++                echo "" >> "$file"
++            fi
++            FILES_MODIFIED=1
++        fi
++    done
++fi
++
++# Re-add modified files to staging
++if [ $FILES_MODIFIED -eq 1 ]; then
++    echo "$STAGED_FILES" | xargs git add 2>/dev/null || true
++    echo -e "${GREEN}[DocuMind] Files formatted and re-staged${NC}"
++fi
++
++echo -e "${GREEN}[DocuMind] Pre-commit formatting complete${NC}"
++exit 0
+diff --git a/.claude/skills/document-processor.md b/.claude/skills/document-processor.md
+new file mode 100644
+index 0000000..71620bf
+--- /dev/null
++++ b/.claude/skills/document-processor.md
+@@ -0,0 +1,131 @@
++---
++name: document-processor
++description: Process uploaded documents - extract text, metadata, and prepare for chunking
++triggers:
++  - "process document"
++  - "process file"
++  - "upload document"
++  - "ingest document"
++---
++
++# Document Processor Skill
++
++This skill processes uploaded documents for the DocuMind knowledge base.
++
++## What This Skill Does
++
++1. **Accepts** a file path or document content
++2. **Extracts** text content based on file type
++3. **Extracts** metadata (title, author, date, file type)
++4. **Prepares** content for chunking and embedding (Session 5+)
++5. **Returns** structured output for downstream processing
++
++## Usage
++
++```
++/skill document-processor
++
++Then provide:
++- File path: /path/to/document.pdf
++- Or paste document content directly
++```
++
++## Supported File Types
++
++| Type | Extension | Status |
++|------|-----------|--------|
++| Plain Text | .txt | Supported |
++| Markdown | .md | Supported |
++| PDF | .pdf | Session 7 |
++| Word | .docx | Session 7 |
++| Excel | .xlsx | Session 7 |
++
++## Processing Steps
++
++### Step 1: File Type Detection
++Determine the file type from extension or content inspection.
++
++### Step 2: Text Extraction
++Extract raw text content using appropriate parser:
++- `.txt` / `.md`: Direct read
++- `.pdf`: PyPDF2 or pdfplumber (Session 7)
++- `.docx`: python-docx (Session 7)
++
++### Step 3: Metadata Extraction
++Extract and structure metadata:
++```json
++{
++  "title": "Document Title",
++  "file_type": "markdown",
++  "file_size": 1234,
++  "word_count": 500,
++  "created_at": "2024-11-24T10:00:00Z",
++  "source_path": "/docs/sample.md"
++}
++```
++
++### Step 4: Content Preparation
++Prepare content for downstream processing:
++- Clean whitespace and formatting
++- Preserve structure (headings, lists)
++- Mark section boundaries
++
++## Output Format
++
++```json
++{
++  "success": true,
++  "document": {
++    "id": "doc_abc123",
++    "title": "Sample Document",
++    "content": "Full extracted text...",
++    "metadata": {
++      "file_type": "markdown",
++      "word_count": 500,
++      "source_path": "/docs/sample.md"
++    }
++  },
++  "ready_for_chunking": true
++}
++```
++
++## Example
++
++**Input**:
++```
++Process the document at: docs/sample-docs/company-policy.md
++```
++
++**Output**:
++```
++Document processed successfully!
++
++Title: Company Policy Manual
++Type: Markdown
++Words: 2,450
++Sections: 8
++
++Content preview:
++"# Company Policy Manual
++
++## 1. Introduction
++This document outlines..."
++
++Ready for chunking: Yes
++Next step: Run chunking pipeline (Session 5+)
++```
++
++## Error Handling
++
++| Error | Cause | Resolution |
++|-------|-------|------------|
++| File not found | Invalid path | Check file path exists |
++| Unsupported type | Unknown extension | Convert to supported format |
++| Empty content | File is empty | Provide file with content |
++| Encoding error | Non-UTF8 file | Convert file encoding |
++
++## Integration Points
++
++- **Session 5**: Feeds into multi-agent chunking pipeline
++- **Session 6**: Provides content for RAG queries
++- **Session 7**: Extended with advanced parsers
+diff --git a/.claude/subagents/summarizer.md b/.claude/subagents/summarizer.md
+new file mode 100644
+index 0000000..9a391c4
+--- /dev/null
++++ b/.claude/subagents/summarizer.md
+@@ -0,0 +1,130 @@
++---
++name: summarizer
++description: Generate concise summaries and extract key points from documents
++model: claude-sonnet-4-20250514
++temperature: 0.3
++max_tokens: 2000
++---
++
++# Summarizer Subagent
++
++A specialized subagent for generating summaries and extracting key information from documents.
++
++## Purpose
++
++The Summarizer subagent takes document content and produces:
++1. A concise summary (3-5 bullet points)
++2. Key entities (people, organizations, dates, topics)
++3. Document classification (policy, technical, guide, etc.)
++
++## When to Delegate
++
++Use this subagent when you need to:
++- Quickly understand a document's content
++- Extract the main points from a long document
++- Identify key entities for metadata enrichment
++- Classify document type for organization
++
++## Invocation
++
++```
++Delegate to the summarizer subagent:
++
++Document Title: [title]
++Document Content:
++[paste content here]
++
++Please provide:
++1. Summary (3-5 bullets)
++2. Key entities
++3. Document type classification
++```
++
++## Input Format
++
++The subagent expects:
++- **title**: Document title or filename
++- **content**: Full text content (up to 50,000 chars)
++- **context** (optional): Additional context about the document source
++
++## Output Format
++
++```json
++{
++  "summary": {
++    "bullets": [
++      "Main point 1",
++      "Main point 2",
++      "Main point 3"
++    ],
++    "one_liner": "Brief one-sentence summary"
++  },
++  "entities": {
++    "people": ["John Smith", "Jane Doe"],
++    "organizations": ["Acme Corp", "HR Department"],
++    "dates": ["2024-01-01", "Q4 2024"],
++    "topics": ["vacation policy", "benefits", "PTO"]
++  },
++  "classification": {
++    "type": "policy",
++    "confidence": 0.95,
++    "subcategory": "HR Policy"
++  }
++}
++```
++
++## Example Usage
++
++**Input**:
++```
++Delegate to the summarizer subagent:
++
++Document Title: Employee Vacation Policy 2024
++Document Content:
++# Vacation Policy
++
++## Overview
++All full-time employees are entitled to paid time off (PTO)
++based on their years of service...
++
++[continued content]
++```
++
++**Output**:
++```
++Summary:
++- Full-time employees receive 15-25 PTO days based on tenure
++- PTO requests require 2 weeks advance notice for 3+ days
++- Unused PTO carries over up to 5 days maximum
++- Manager approval required for all time off requests
++- Blackout periods exist during Q4 close
++
++Key Entities:
++- Organizations: HR Department, Management
++- Topics: PTO, vacation, time off, benefits
++- Dates: Annual review, Q4
++
++Classification: HR Policy (confidence: 0.98)
++```
++
++## Configuration
++
++| Parameter | Value | Description |
++|-----------|-------|-------------|
++| model | claude-sonnet-4-20250514 | Fast, accurate for summaries |
++| temperature | 0.3 | Low for consistency |
++| max_tokens | 2000 | Sufficient for detailed output |
++
++## Integration Points
++
++- **Document Processor Skill**: Receives content from document processing
++- **Session 5 Pipeline**: Provides metadata for chunk enrichment
++- **Session 6 RAG**: Summaries used for context assembly
++- **Session 9 Memory**: Summaries stored for quick retrieval
++
++## Best Practices
++
++1. **Chunk large documents**: For documents over 50K chars, process in sections
++2. **Provide context**: Include source information for better classification
++3. **Validate entities**: Review extracted entities for accuracy
++4. **Use summaries wisely**: Great for overviews, but retain full content for search
+diff --git a/docs/sample-docs/company-vacation-policy.md b/docs/sample-docs/company-vacation-policy.md
+new file mode 100644
+index 0000000..442e846
+--- /dev/null
++++ b/docs/sample-docs/company-vacation-policy.md
+@@ -0,0 +1,97 @@
++# Company Vacation Policy
++
++**Effective Date:** January 1, 2024
++**Last Updated:** November 24, 2024
++**Department:** Human Resources
++
++## Overview
++
++This document outlines the vacation and paid time off (PTO) policy for all full-time employees. Our goal is to support work-life balance while maintaining operational efficiency.
++
++## Eligibility
++
++All full-time employees are eligible for PTO benefits starting from their first day of employment. Part-time employees working 20+ hours per week receive prorated benefits.
++
++## PTO Allowance
++
++### Based on Years of Service
++
++| Tenure | Annual PTO Days |
++|--------|-----------------|
++| 0-2 years | 15 days |
++| 2-5 years | 20 days |
++| 5-10 years | 25 days |
++| 10+ years | 30 days |
++
++### Accrual Rate
++
++PTO accrues on a monthly basis at the following rates:
++- **0-2 years:** 1.25 days per month
++- **2-5 years:** 1.67 days per month
++- **5-10 years:** 2.08 days per month
++- **10+ years:** 2.5 days per month
++
++## Requesting Time Off
++
++### Process
++
++1. Submit PTO request through the HR portal
++2. Manager approval required within 5 business days
++3. Requests should be submitted:
++   - 2 weeks in advance for 1-3 days
++   - 4 weeks in advance for 4+ days
++   - 8 weeks in advance for 2+ weeks
++
++### Blackout Periods
++
++The following periods have limited PTO availability:
++- December 15 - January 5 (Holiday season)
++- Quarter-end close periods (last week of March, June, September, December)
++
++During blackout periods, manager and director approval is required.
++
++## Carryover Policy
++
++- Maximum of **5 days** may be carried over to the next calendar year
++- Carried over days must be used by March 31
++- Days beyond the carryover limit are forfeited (use it or lose it)
++
++## Holidays
++
++In addition to PTO, employees receive the following paid holidays:
++- New Year's Day
++- Martin Luther King Jr. Day
++- Presidents' Day
++- Memorial Day
++- Independence Day
++- Labor Day
++- Thanksgiving Day
++- Day after Thanksgiving
++- Christmas Eve
++- Christmas Day
++
++## Special Circumstances
++
++### Sick Leave
++- Separate from PTO
++- 10 days per year
++- Does not carry over
++
++### Bereavement Leave
++- 5 days for immediate family
++- 3 days for extended family
++
++### Jury Duty
++- Paid leave for duration of service
++- Must provide documentation
++
++## Contact
++
++For questions about this policy, contact:
++- **HR Department:** hr@company.com
++- **HR Portal:** https://hr.company.internal
++- **Phone:** (555) 123-4567
++
++---
++
++*This policy is subject to change. Employees will be notified of any updates via email.*
+diff --git a/docs/sample-docs/engineering-deployment-guide.md b/docs/sample-docs/engineering-deployment-guide.md
+new file mode 100644
+index 0000000..b85b9c7
+--- /dev/null
++++ b/docs/sample-docs/engineering-deployment-guide.md
+@@ -0,0 +1,198 @@
++# Engineering Deployment Guide
++
++**Version:** 2.1.0
++**Last Updated:** November 2024
++**Owner:** Platform Engineering Team
++
++## Overview
++
++This guide covers the standard deployment process for production applications. All deployments must follow these procedures to ensure system stability and compliance.
++
++## Prerequisites
++
++Before deploying, ensure:
++
++- [ ] All tests pass in CI/CD pipeline
++- [ ] Code review approved by 2+ engineers
++- [ ] Security scan completed (no critical/high vulnerabilities)
++- [ ] Database migrations reviewed by DBA
++- [ ] Change request approved (for production)
++- [ ] Rollback plan documented
++
++## Environments
++
++| Environment | Purpose | Deployment |
++|-------------|---------|------------|
++| Development | Feature development | Automatic on PR |
++| Staging | Integration testing | Automatic on merge to main |
++| Production | Live traffic | Manual approval required |
++
++## Deployment Process
++
++### 1. Pre-Deployment Checklist
++
++```bash
++# Verify current state
++git status
++git log --oneline -5
++
++# Ensure on correct branch
++git checkout main
++git pull origin main
++
++# Run local verification
++npm test
++npm run build
++```
++
++### 2. Create Release
++
++```bash
++# Create release tag
++git tag -a v1.2.3 -m "Release v1.2.3: Feature description"
++git push origin v1.2.3
++
++# Or use release script
++./scripts/create-release.sh v1.2.3
++```
++
++### 3. Deploy to Staging
++
++Staging deploys automatically when:
++- A new tag is pushed matching pattern `v*.*.*`
++- CI/CD pipeline passes
++
++Monitor staging deployment:
++```bash
++# Check deployment status
++kubectl get deployments -n staging
++
++# View logs
++kubectl logs -f deployment/app -n staging
++
++# Verify health
++curl https://staging.company.com/health
++```
++
++### 4. Production Deployment
++
++Production requires manual approval:
++
++1. Open GitHub Actions workflow
++2. Select "Deploy to Production" workflow
++3. Click "Run workflow"
++4. Enter release version
++5. Wait for approval from platform team
++
++### 5. Post-Deployment Verification
++
++```bash
++# Check deployment status
++kubectl get deployments -n production
++
++# Verify health endpoints
++curl https://api.company.com/health
++curl https://api.company.com/ready
++
++# Check metrics dashboard
++open https://grafana.company.internal/d/production-overview
++```
++
++## Rollback Procedure
++
++If issues are detected:
++
++### Immediate Rollback (< 5 min)
++
++```bash
++# Rollback to previous deployment
++kubectl rollout undo deployment/app -n production
++
++# Verify rollback
++kubectl rollout status deployment/app -n production
++```
++
++### Manual Rollback
++
++```bash
++# Deploy specific version
++kubectl set image deployment/app app=registry.company.com/app:v1.2.2
++
++# Or use Helm
++helm rollback app 42 -n production
++```
++
++## Database Migrations
++
++### Forward Migrations
++
++```bash
++# Run migrations
++npm run migrate:up
++
++# Verify migration status
++npm run migrate:status
++```
++
++### Rollback Migrations
++
++```bash
++# Rollback last migration
++npm run migrate:down
++
++# Rollback to specific version
++npm run migrate:to 20241101_create_users
++```
++
++**Important:** Database rollbacks may cause data loss. Always backup before migration.
++
++## Monitoring & Alerts
++
++### Key Metrics to Watch
++
++- Error rate (should be < 0.1%)
++- P99 latency (should be < 500ms)
++- CPU/Memory utilization (should be < 80%)
++- Active connections
++- Queue depth
++
++### Alert Escalation
++
++| Severity | Response Time | Escalation |
++|----------|--------------|------------|
++| Critical | 5 min | On-call + Manager |
++| High | 30 min | On-call |
++| Medium | 4 hours | Next business day |
++| Low | 24 hours | Sprint planning |
++
++## Contacts
++
++- **On-Call:** #platform-oncall (Slack)
++- **Platform Team:** platform@company.com
++- **Emergency:** (555) 911-HELP
++
++## Appendix
++
++### Common Issues
++
++**Deployment stuck in pending:**
++```bash
++kubectl describe deployment/app -n production
++# Check for resource constraints or image pull issues
++```
++
++**Health check failing:**
++```bash
++kubectl exec -it deployment/app -- curl localhost:8080/health
++# Verify application is starting correctly
++```
++
++**Database connection issues:**
++```bash
++# Check connection pool
++kubectl exec -it deployment/app -- npm run db:check
++```
++
++---
++
++*For detailed troubleshooting, see the [Troubleshooting Guide](./troubleshooting.md)*
+diff --git a/requirements.txt b/requirements.txt
+new file mode 100644
+index 0000000..992f8de
+--- /dev/null
++++ b/requirements.txt
+@@ -0,0 +1,24 @@
++# DocuMind Dependencies
++# Session 3: Foundation
++
++# Core
++python-dotenv>=1.0.0
++
++# Testing
++pytest>=7.4.0
++pytest-cov>=4.1.0
++
++# Code Quality
++black>=23.0.0
++isort>=5.12.0
++
++# Session 4+ Dependencies (uncomment as needed)
++# supabase>=2.0.0          # Session 4: Database
++# openai>=1.0.0            # Session 5: Embeddings
++# PyPDF2>=3.0.0            # Session 7: PDF parsing
++# pdfplumber>=0.10.0       # Session 7: Complex PDF
++# python-docx>=1.0.0       # Session 7: Word docs
++# pandas>=2.0.0            # Session 7: Spreadsheets
++# openpyxl>=3.1.0          # Session 7: Excel
++# ragas>=0.1.0             # Session 10: Evaluation
++# trulens-eval>=0.20.0     # Session 10: Monitoring
+diff --git a/src/documind/__init__.py b/src/documind/__init__.py
+index 19d137c..21d3d03 100644
+--- a/src/documind/__init__.py
++++ b/src/documind/__init__.py
+@@ -3,7 +3,32 @@ DocuMind - AI-Powered Knowledge Management System
+ 
+ This package contains the core DocuMind application built during
+ the AI-Powered Software Development course.
++
++Session 3: Skills, Subagents, Hooks (Foundation)
++- document_processor: Process documents for ingestion
++- openrouter: Multi-model LLM gateway
++- config: Environment configuration
++
++Session 4+: Database, RAG, Multi-agent, etc.
+ """
+ 
+-__version__ = "1.0.0"
++__version__ = "0.3.0"  # Session 3 complete
+ __author__ = "HeroForge Course Students"
++
++# Session 3 exports
++from .config import validate_config, get_env
++from .document_processor import DocumentProcessor, ProcessedDocument, process_document
++from .openrouter import OpenRouterClient, get_client
++
++__all__ = [
++    # Config
++    "validate_config",
++    "get_env",
++    # Document Processing
++    "DocumentProcessor",
++    "ProcessedDocument",
++    "process_document",
++    # OpenRouter
++    "OpenRouterClient",
++    "get_client",
++]
+diff --git a/src/documind/document_processor.py b/src/documind/document_processor.py
+new file mode 100644
+index 0000000..fbe42c5
+--- /dev/null
++++ b/src/documind/document_processor.py
+@@ -0,0 +1,350 @@
++"""
++DocuMind Document Processor
++
++Handles document ingestion, text extraction, and metadata parsing.
++This is the Python implementation backing the document-processor skill.
++
++Session 3: Basic text/markdown support
++Session 7: Extended with PDF, DOCX, XLSX support
++"""
++
++import os
++import json
++from datetime import datetime
++from typing import Optional, Dict, Any, Tuple
++from dataclasses import dataclass, asdict
++from pathlib import Path
++import hashlib
++
++
++@dataclass
++class DocumentMetadata:
++    """Metadata extracted from a document."""
++    title: str
++    file_type: str
++    file_size: int
++    word_count: int
++    char_count: int
++    source_path: str
++    created_at: str
++    content_hash: str
++
++    def to_dict(self) -> Dict[str, Any]:
++        return asdict(self)
++
++
++@dataclass
++class ProcessedDocument:
++    """Result of document processing."""
++    id: str
++    title: str
++    content: str
++    metadata: DocumentMetadata
++    success: bool
++    error: Optional[str] = None
++
++    def to_dict(self) -> Dict[str, Any]:
++        return {
++            "id": self.id,
++            "title": self.title,
++            "content": self.content,
++            "metadata": self.metadata.to_dict(),
++            "success": self.success,
++            "error": self.error
++        }
++
++    def to_json(self) -> str:
++        return json.dumps(self.to_dict(), indent=2)
++
++
++class DocumentProcessor:
++    """
++    Process documents for DocuMind knowledge base.
++
++    Supported formats (Session 3):
++    - Plain text (.txt)
++    - Markdown (.md)
++
++    Extended formats (Session 7):
++    - PDF (.pdf)
++    - Word (.docx)
++    - Excel (.xlsx, .csv)
++
++    Usage:
++        processor = DocumentProcessor()
++        result = processor.process_file("/path/to/document.md")
++        if result.success:
++            print(result.content)
++    """
++
++    # Supported file extensions and their types
++    SUPPORTED_TYPES = {
++        ".txt": "text",
++        ".md": "markdown",
++        ".markdown": "markdown",
++        # Session 7 additions (placeholders)
++        ".pdf": "pdf",
++        ".docx": "docx",
++        ".xlsx": "xlsx",
++        ".csv": "csv",
++    }
++
++    def __init__(self, base_path: Optional[str] = None):
++        """
++        Initialize document processor.
++
++        Args:
++            base_path: Optional base path for resolving relative paths
++        """
++        self.base_path = Path(base_path) if base_path else Path.cwd()
++
++    def process_file(self, file_path: str) -> ProcessedDocument:
++        """
++        Process a single file.
++
++        Args:
++            file_path: Path to the file to process
++
++        Returns:
++            ProcessedDocument with content and metadata
++        """
++        path = self._resolve_path(file_path)
++
++        # Validate file exists
++        if not path.exists():
++            return self._error_result(file_path, f"File not found: {path}")
++
++        if not path.is_file():
++            return self._error_result(file_path, f"Not a file: {path}")
++
++        # Check file type
++        file_type = self._get_file_type(path)
++        if file_type is None:
++            return self._error_result(
++                file_path,
++                f"Unsupported file type: {path.suffix}"
++            )
++
++        # Extract content based on type
++        try:
++            content, title = self._extract_content(path, file_type)
++        except Exception as e:
++            return self._error_result(file_path, f"Extraction error: {str(e)}")
++
++        # Generate metadata
++        metadata = self._generate_metadata(path, content, file_type)
++
++        # Generate document ID
++        doc_id = self._generate_id(path, content)
++
++        return ProcessedDocument(
++            id=doc_id,
++            title=title or path.stem,
++            content=content,
++            metadata=metadata,
++            success=True
++        )
++
++    def process_content(
++        self,
++        content: str,
++        title: str = "Untitled",
++        file_type: str = "text"
++    ) -> ProcessedDocument:
++        """
++        Process raw content (not from file).
++
++        Args:
++            content: Raw text content
++            title: Document title
++            file_type: Type of content
++
++        Returns:
++            ProcessedDocument
++        """
++        doc_id = self._generate_id_from_content(content)
++
++        metadata = DocumentMetadata(
++            title=title,
++            file_type=file_type,
++            file_size=len(content.encode("utf-8")),
++            word_count=len(content.split()),
++            char_count=len(content),
++            source_path="<direct_input>",
++            created_at=datetime.utcnow().isoformat() + "Z",
++            content_hash=hashlib.md5(content.encode()).hexdigest()
++        )
++
++        return ProcessedDocument(
++            id=doc_id,
++            title=title,
++            content=content,
++            metadata=metadata,
++            success=True
++        )
++
++    def _resolve_path(self, file_path: str) -> Path:
++        """Resolve file path, handling relative paths."""
++        path = Path(file_path)
++        if not path.is_absolute():
++            path = self.base_path / path
++        return path.resolve()
++
++    def _get_file_type(self, path: Path) -> Optional[str]:
++        """Get file type from extension."""
++        return self.SUPPORTED_TYPES.get(path.suffix.lower())
++
++    def _extract_content(self, path: Path, file_type: str) -> Tuple[str, Optional[str]]:
++        """
++        Extract content and title from file.
++
++        Returns:
++            Tuple of (content, title)
++        """
++        if file_type in ("text", "markdown"):
++            return self._extract_text(path)
++        elif file_type == "pdf":
++            return self._extract_pdf(path)
++        elif file_type == "docx":
++            return self._extract_docx(path)
++        elif file_type in ("xlsx", "csv"):
++            return self._extract_spreadsheet(path, file_type)
++        else:
++            raise ValueError(f"Unknown file type: {file_type}")
++
++    def _extract_text(self, path: Path) -> Tuple[str, Optional[str]]:
++        """Extract content from text/markdown file."""
++        with open(path, "r", encoding="utf-8") as f:
++            content = f.read()
++
++        # Try to extract title from markdown
++        title = None
++        if path.suffix.lower() in (".md", ".markdown"):
++            lines = content.split("\n")
++            for line in lines:
++                line = line.strip()
++                if line.startswith("# "):
++                    title = line[2:].strip()
++                    break
++
++        return content, title
++
++    def _extract_pdf(self, path: Path) -> Tuple[str, Optional[str]]:
++        """
++        Extract content from PDF file.
++
++        Session 7: Full implementation with PyPDF2/pdfplumber
++        """
++        # Placeholder for Session 7
++        raise NotImplementedError(
++            "PDF extraction available in Session 7. "
++            "Install: pip install PyPDF2 pdfplumber"
++        )
++
++    def _extract_docx(self, path: Path) -> Tuple[str, Optional[str]]:
++        """
++        Extract content from Word document.
++
++        Session 7: Full implementation with python-docx
++        """
++        # Placeholder for Session 7
++        raise NotImplementedError(
++            "DOCX extraction available in Session 7. "
++            "Install: pip install python-docx"
++        )
++
++    def _extract_spreadsheet(self, path: Path, file_type: str) -> Tuple[str, Optional[str]]:
++        """
++        Extract content from spreadsheet.
++
++        Session 7: Full implementation with pandas/openpyxl
++        """
++        # Placeholder for Session 7
++        raise NotImplementedError(
++            "Spreadsheet extraction available in Session 7. "
++            "Install: pip install pandas openpyxl"
++        )
++
++    def _generate_metadata(
++        self,
++        path: Path,
++        content: str,
++        file_type: str
++    ) -> DocumentMetadata:
++        """Generate metadata for a document."""
++        stat = path.stat()
++
++        return DocumentMetadata(
++            title=path.stem,
++            file_type=file_type,
++            file_size=stat.st_size,
++            word_count=len(content.split()),
++            char_count=len(content),
++            source_path=str(path),
++            created_at=datetime.fromtimestamp(stat.st_mtime).isoformat() + "Z",
++            content_hash=hashlib.md5(content.encode()).hexdigest()
++        )
++
++    def _generate_id(self, path: Path, content: str) -> str:
++        """Generate unique document ID."""
++        hash_input = f"{path}:{content[:1000]}"
++        return f"doc_{hashlib.sha256(hash_input.encode()).hexdigest()[:12]}"
++
++    def _generate_id_from_content(self, content: str) -> str:
++        """Generate ID from content only."""
++        return f"doc_{hashlib.sha256(content.encode()).hexdigest()[:12]}"
++
++    def _error_result(self, file_path: str, error: str) -> ProcessedDocument:
++        """Create error result."""
++        return ProcessedDocument(
++            id="",
++            title=Path(file_path).stem if file_path else "Unknown",
++            content="",
++            metadata=DocumentMetadata(
++                title="",
++                file_type="unknown",
++                file_size=0,
++                word_count=0,
++                char_count=0,
++                source_path=file_path,
++                created_at=datetime.utcnow().isoformat() + "Z",
++                content_hash=""
++            ),
++            success=False,
++            error=error
++        )
++
++
++# Convenience function
++def process_document(file_path: str) -> ProcessedDocument:
++    """Process a document file."""
++    processor = DocumentProcessor()
++    return processor.process_file(file_path)
++
++
++# CLI for testing
++if __name__ == "__main__":
++    import sys
++
++    if len(sys.argv) < 2:
++        print("Usage: python document_processor.py <file_path>")
++        print("\nSupported types: .txt, .md")
++        print("Session 7 adds: .pdf, .docx, .xlsx, .csv")
++        sys.exit(1)
++
++    file_path = sys.argv[1]
++    processor = DocumentProcessor()
++    result = processor.process_file(file_path)
++
++    if result.success:
++        print(f"Document ID: {result.id}")
++        print(f"Title: {result.title}")
++        print(f"Type: {result.metadata.file_type}")
++        print(f"Words: {result.metadata.word_count}")
++        print(f"Characters: {result.metadata.char_count}")
++        print("-" * 40)
++        print("Content preview:")
++        print(result.content[:500] + "..." if len(result.content) > 500 else result.content)
++    else:
++        print(f"Error: {result.error}")
++        sys.exit(1)
+diff --git a/src/documind/openrouter.py b/src/documind/openrouter.py
+new file mode 100644
+index 0000000..a97fe29
+--- /dev/null
++++ b/src/documind/openrouter.py
+@@ -0,0 +1,302 @@
++"""
++DocuMind OpenRouter Client
++
++Multi-model LLM gateway for flexible model selection.
++Supports Claude, GPT-4, Gemini, and other models via OpenRouter.
++
++Session 3: Foundation setup
++Session 6+: Used for RAG answer generation
++"""
++
++import os
++import json
++from typing import Optional, Dict, Any, List
++from dataclasses import dataclass
++import urllib.request
++import urllib.error
++
++
++@dataclass
++class OpenRouterConfig:
++    """Configuration for OpenRouter client."""
++    api_key: str
++    default_model: str = "anthropic/claude-3.5-sonnet"
++    base_url: str = "https://openrouter.ai/api/v1"
++    max_tokens: int = 4096
++    temperature: float = 0.7
++    site_url: str = "https://documind.app"
++    site_name: str = "DocuMind"
++
++
++class OpenRouterClient:
++    """
++    Client for OpenRouter multi-model API.
++
++    Provides a unified interface to multiple LLM providers:
++    - Anthropic (Claude)
++    - OpenAI (GPT-4)
++    - Google (Gemini)
++    - And many more
++
++    Usage:
++        client = OpenRouterClient()
++        response = client.chat("What is the vacation policy?", context="...")
++    """
++
++    # Available models with cost indicators
++    MODELS = {
++        # Anthropic
++        "anthropic/claude-3.5-sonnet": {"name": "Claude 3.5 Sonnet", "cost": "$$"},
++        "anthropic/claude-3-haiku": {"name": "Claude 3 Haiku", "cost": "$"},
++        # OpenAI
++        "openai/gpt-4-turbo": {"name": "GPT-4 Turbo", "cost": "$$$"},
++        "openai/gpt-4o": {"name": "GPT-4o", "cost": "$$"},
++        "openai/gpt-4o-mini": {"name": "GPT-4o Mini", "cost": "$"},
++        # Google
++        "google/gemini-pro-1.5": {"name": "Gemini Pro 1.5", "cost": "$$"},
++        "google/gemini-flash-1.5": {"name": "Gemini Flash", "cost": "$"},
++    }
++
++    def __init__(self, config: Optional[OpenRouterConfig] = None):
++        """
++        Initialize OpenRouter client.
++
++        Args:
++            config: Optional configuration. If not provided, reads from environment.
++        """
++        if config:
++            self.config = config
++        else:
++            api_key = os.getenv("OPENROUTER_API_KEY", "")
++            default_model = os.getenv("DEFAULT_LLM_MODEL", "anthropic/claude-3.5-sonnet")
++            self.config = OpenRouterConfig(api_key=api_key, default_model=default_model)
++
++        self._validate_config()
++
++    def _validate_config(self) -> None:
++        """Validate configuration."""
++        if not self.config.api_key:
++            print("Warning: OPENROUTER_API_KEY not set. API calls will fail.")
++
++    def list_models(self) -> Dict[str, Dict[str, str]]:
++        """
++        List available models.
++
++        Returns:
++            Dictionary of model IDs to model info
++        """
++        return self.MODELS
++
++    def chat(
++        self,
++        message: str,
++        context: Optional[str] = None,
++        system_prompt: Optional[str] = None,
++        model: Optional[str] = None,
++        temperature: Optional[float] = None,
++        max_tokens: Optional[int] = None,
++    ) -> Dict[str, Any]:
++        """
++        Send a chat completion request.
++
++        Args:
++            message: User message/query
++            context: Optional context (e.g., retrieved documents for RAG)
++            system_prompt: Optional system prompt override
++            model: Model to use (defaults to config default)
++            temperature: Temperature for generation
++            max_tokens: Max tokens to generate
++
++        Returns:
++            Response dictionary with 'content', 'model', 'usage'
++        """
++        model = model or self.config.default_model
++        temperature = temperature if temperature is not None else self.config.temperature
++        max_tokens = max_tokens or self.config.max_tokens
++
++        # Build messages
++        messages = []
++
++        # System prompt
++        if system_prompt:
++            messages.append({"role": "system", "content": system_prompt})
++        else:
++            messages.append({
++                "role": "system",
++                "content": self._default_system_prompt()
++            })
++
++        # Add context if provided (for RAG)
++        if context:
++            messages.append({
++                "role": "user",
++                "content": f"Here is relevant context from our knowledge base:\n\n{context}\n\n---\n\nBased on the above context, please answer the following question:"
++            })
++
++        # Add user message
++        messages.append({"role": "user", "content": message})
++
++        # Make API request
++        return self._make_request(
++            messages=messages,
++            model=model,
++            temperature=temperature,
++            max_tokens=max_tokens
++        )
++
++    def _default_system_prompt(self) -> str:
++        """Default system prompt for DocuMind."""
++        return """You are DocuMind, an intelligent assistant for company knowledge bases.
++
++Your role is to:
++1. Answer questions accurately based on provided context
++2. Always cite your sources when information comes from documents
++3. Be concise but thorough
++4. Admit when you don't have enough information to answer
++5. Never make up information not present in the context
++
++When answering:
++- Start with a direct answer
++- Provide supporting details from the context
++- Include source citations in [brackets]
++- Suggest related topics if relevant"""
++
++    def _make_request(
++        self,
++        messages: List[Dict[str, str]],
++        model: str,
++        temperature: float,
++        max_tokens: int
++    ) -> Dict[str, Any]:
++        """
++        Make HTTP request to OpenRouter API.
++
++        Uses urllib to avoid external dependencies.
++        """
++        if not self.config.api_key:
++            return {
++                "success": False,
++                "error": "OPENROUTER_API_KEY not configured",
++                "content": None
++            }
++
++        url = f"{self.config.base_url}/chat/completions"
++
++        payload = {
++            "model": model,
++            "messages": messages,
++            "temperature": temperature,
++            "max_tokens": max_tokens,
++        }
++
++        headers = {
++            "Authorization": f"Bearer {self.config.api_key}",
++            "Content-Type": "application/json",
++            "HTTP-Referer": self.config.site_url,
++            "X-Title": self.config.site_name,
++        }
++
++        try:
++            data = json.dumps(payload).encode("utf-8")
++            req = urllib.request.Request(url, data=data, headers=headers, method="POST")
++
++            with urllib.request.urlopen(req, timeout=60) as response:
++                result = json.loads(response.read().decode("utf-8"))
++
++                return {
++                    "success": True,
++                    "content": result["choices"][0]["message"]["content"],
++                    "model": result.get("model", model),
++                    "usage": result.get("usage", {}),
++                    "raw_response": result
++                }
++
++        except urllib.error.HTTPError as e:
++            error_body = e.read().decode("utf-8") if e.fp else str(e)
++            return {
++                "success": False,
++                "error": f"HTTP {e.code}: {error_body}",
++                "content": None
++            }
++        except urllib.error.URLError as e:
++            return {
++                "success": False,
++                "error": f"URL Error: {str(e)}",
++                "content": None
++            }
++        except Exception as e:
++            return {
++                "success": False,
++                "error": f"Error: {str(e)}",
++                "content": None
++            }
++
++    def compare_models(
++        self,
++        message: str,
++        context: Optional[str] = None,
++        models: Optional[List[str]] = None
++    ) -> Dict[str, Dict[str, Any]]:
++        """
++        Compare responses from multiple models.
++
++        Useful for A/B testing and model selection (Session 10).
++
++        Args:
++            message: Query to send to all models
++            context: Optional context for RAG
++            models: List of models to compare (defaults to top 3)
++
++        Returns:
++            Dictionary mapping model ID to response
++        """
++        if models is None:
++            models = [
++                "anthropic/claude-3.5-sonnet",
++                "openai/gpt-4o",
++                "google/gemini-pro-1.5"
++            ]
++
++        results = {}
++        for model in models:
++            print(f"Querying {model}...")
++            results[model] = self.chat(
++                message=message,
++                context=context,
++                model=model
++            )
++
++        return results
++
++
++# Convenience function for quick usage
++def get_client() -> OpenRouterClient:
++    """Get a configured OpenRouter client."""
++    return OpenRouterClient()
++
++
++# CLI for testing
++if __name__ == "__main__":
++    import sys
++
++    client = get_client()
++
++    print("DocuMind OpenRouter Client")
++    print("=" * 40)
++    print(f"Default model: {client.config.default_model}")
++    print(f"API key configured: {'Yes' if client.config.api_key else 'No'}")
++    print()
++
++    print("Available models:")
++    for model_id, info in client.list_models().items():
++        print(f"  {info['cost']} {model_id} ({info['name']})")
++
++    if len(sys.argv) > 1:
++        query = " ".join(sys.argv[1:])
++        print(f"\nQuery: {query}")
++        print("-" * 40)
++        response = client.chat(query)
++        if response["success"]:
++            print(response["content"])
++        else:
++            print(f"Error: {response['error']}")
+diff --git a/tests/test_document_processor.py b/tests/test_document_processor.py
+new file mode 100644
+index 0000000..30a06b4
+--- /dev/null
++++ b/tests/test_document_processor.py
+@@ -0,0 +1,224 @@
++"""
++Tests for DocuMind Document Processor
++
++Session 3: Basic document processing tests
++"""
++
++import pytest
++import tempfile
++import os
++from pathlib import Path
++
++from src.documind.document_processor import (
++    DocumentProcessor,
++    ProcessedDocument,
++    DocumentMetadata,
++    process_document,
++)
++
++
++class TestDocumentProcessor:
++    """Test suite for DocumentProcessor class."""
++
++    def setup_method(self):
++        """Set up test fixtures."""
++        self.processor = DocumentProcessor()
++        self.temp_dir = tempfile.mkdtemp()
++
++    def teardown_method(self):
++        """Clean up test fixtures."""
++        import shutil
++        shutil.rmtree(self.temp_dir, ignore_errors=True)
++
++    def _create_temp_file(self, filename: str, content: str) -> str:
++        """Create a temporary file with content."""
++        filepath = os.path.join(self.temp_dir, filename)
++        with open(filepath, "w", encoding="utf-8") as f:
++            f.write(content)
++        return filepath
++
++    def test_process_text_file(self):
++        """Test processing a plain text file."""
++        content = "This is a test document.\nIt has multiple lines."
++        filepath = self._create_temp_file("test.txt", content)
++
++        result = self.processor.process_file(filepath)
++
++        assert result.success is True
++        assert result.content == content
++        assert result.metadata.file_type == "text"
++        assert result.metadata.word_count == 9
++        assert result.id.startswith("doc_")
++
++    def test_process_markdown_file(self):
++        """Test processing a markdown file with title extraction."""
++        content = "# My Document Title\n\nThis is the content.\n\n## Section 1\n\nMore content."
++        filepath = self._create_temp_file("test.md", content)
++
++        result = self.processor.process_file(filepath)
++
++        assert result.success is True
++        assert result.title == "My Document Title"
++        assert result.metadata.file_type == "markdown"
++        assert "## Section 1" in result.content
++
++    def test_process_markdown_without_title(self):
++        """Test markdown file without h1 title."""
++        content = "Some content without a header title."
++        filepath = self._create_temp_file("notitle.md", content)
++
++        result = self.processor.process_file(filepath)
++
++        assert result.success is True
++        assert result.title == "notitle"  # Uses filename stem
++
++    def test_process_nonexistent_file(self):
++        """Test processing a file that doesn't exist."""
++        result = self.processor.process_file("/nonexistent/path/file.txt")
++
++        assert result.success is False
++        assert "not found" in result.error.lower()
++
++    def test_process_unsupported_type(self):
++        """Test processing an unsupported file type."""
++        filepath = self._create_temp_file("test.xyz", "content")
++
++        result = self.processor.process_file(filepath)
++
++        assert result.success is False
++        assert "unsupported" in result.error.lower()
++
++    def test_process_content_directly(self):
++        """Test processing raw content without a file."""
++        content = "Direct content processing test."
++
++        result = self.processor.process_content(
++            content=content,
++            title="Direct Input",
++            file_type="text"
++        )
++
++        assert result.success is True
++        assert result.title == "Direct Input"
++        assert result.content == content
++        assert result.metadata.source_path == "<direct_input>"
++
++    def test_metadata_generation(self):
++        """Test that metadata is correctly generated."""
++        content = "Word one two three four five."
++        filepath = self._create_temp_file("meta_test.txt", content)
++
++        result = self.processor.process_file(filepath)
++
++        assert result.success is True
++        assert result.metadata.word_count == 6
++        assert result.metadata.char_count == len(content)
++        assert result.metadata.file_size > 0
++        assert result.metadata.content_hash != ""
++
++    def test_document_id_uniqueness(self):
++        """Test that different content produces different IDs."""
++        content1 = "First document content."
++        content2 = "Second document content."
++        filepath1 = self._create_temp_file("doc1.txt", content1)
++        filepath2 = self._create_temp_file("doc2.txt", content2)
++
++        result1 = self.processor.process_file(filepath1)
++        result2 = self.processor.process_file(filepath2)
++
++        assert result1.id != result2.id
++
++    def test_convenience_function(self):
++        """Test the process_document convenience function."""
++        content = "Test content for convenience function."
++        filepath = self._create_temp_file("convenience.txt", content)
++
++        result = process_document(filepath)
++
++        assert result.success is True
++        assert result.content == content
++
++
++class TestProcessedDocument:
++    """Test suite for ProcessedDocument dataclass."""
++
++    def test_to_dict(self):
++        """Test conversion to dictionary."""
++        metadata = DocumentMetadata(
++            title="Test",
++            file_type="text",
++            file_size=100,
++            word_count=10,
++            char_count=50,
++            source_path="/test/path",
++            created_at="2024-01-01T00:00:00Z",
++            content_hash="abc123"
++        )
++
++        doc = ProcessedDocument(
++            id="doc_123",
++            title="Test Document",
++            content="Test content",
++            metadata=metadata,
++            success=True
++        )
++
++        result = doc.to_dict()
++
++        assert result["id"] == "doc_123"
++        assert result["title"] == "Test Document"
++        assert result["metadata"]["word_count"] == 10
++
++    def test_to_json(self):
++        """Test conversion to JSON string."""
++        metadata = DocumentMetadata(
++            title="Test",
++            file_type="text",
++            file_size=100,
++            word_count=10,
++            char_count=50,
++            source_path="/test/path",
++            created_at="2024-01-01T00:00:00Z",
++            content_hash="abc123"
++        )
++
++        doc = ProcessedDocument(
++            id="doc_123",
++            title="Test Document",
++            content="Test content",
++            metadata=metadata,
++            success=True
++        )
++
++        json_str = doc.to_json()
++
++        assert '"id": "doc_123"' in json_str
++        assert '"success": true' in json_str
++
++
++class TestPDFPlaceholder:
++    """Test that PDF processing raises appropriate error for Session 3."""
++
++    def setup_method(self):
++        self.processor = DocumentProcessor()
++        self.temp_dir = tempfile.mkdtemp()
++
++    def teardown_method(self):
++        import shutil
++        shutil.rmtree(self.temp_dir, ignore_errors=True)
++
++    def test_pdf_not_implemented(self):
++        """PDF processing should indicate it's available in Session 7."""
++        # Create a fake PDF file (just the extension matters for this test)
++        filepath = os.path.join(self.temp_dir, "test.pdf")
++        with open(filepath, "wb") as f:
++            f.write(b"%PDF-1.4 fake content")
++
++        result = self.processor.process_file(filepath)
++
++        assert result.success is False
++        assert "Session 7" in result.error
++
++
++if __name__ == "__main__":
++    pytest.main([__file__, "-v"])
+diff --git a/tests/test_openrouter.py b/tests/test_openrouter.py
+new file mode 100644
+index 0000000..a2f3ec1
+--- /dev/null
++++ b/tests/test_openrouter.py
+@@ -0,0 +1,180 @@
++"""
++Tests for DocuMind OpenRouter Client
++
++Session 3: OpenRouter client tests
++"""
++
++import pytest
++import os
++from unittest.mock import patch, MagicMock
++
++from src.documind.openrouter import (
++    OpenRouterClient,
++    OpenRouterConfig,
++    get_client,
++)
++
++
++class TestOpenRouterConfig:
++    """Test suite for OpenRouterConfig."""
++
++    def test_default_config(self):
++        """Test default configuration values."""
++        config = OpenRouterConfig(api_key="test-key")
++
++        assert config.api_key == "test-key"
++        assert config.default_model == "anthropic/claude-3.5-sonnet"
++        assert config.base_url == "https://openrouter.ai/api/v1"
++        assert config.max_tokens == 4096
++        assert config.temperature == 0.7
++
++    def test_custom_config(self):
++        """Test custom configuration values."""
++        config = OpenRouterConfig(
++            api_key="custom-key",
++            default_model="openai/gpt-4o",
++            max_tokens=2048,
++            temperature=0.5
++        )
++
++        assert config.api_key == "custom-key"
++        assert config.default_model == "openai/gpt-4o"
++        assert config.max_tokens == 2048
++        assert config.temperature == 0.5
++
++
++class TestOpenRouterClient:
++    """Test suite for OpenRouterClient."""
++
++    def test_init_with_config(self):
++        """Test initialization with explicit config."""
++        config = OpenRouterConfig(api_key="test-key")
++        client = OpenRouterClient(config=config)
++
++        assert client.config.api_key == "test-key"
++
++    def test_init_from_environment(self):
++        """Test initialization from environment variables."""
++        with patch.dict(os.environ, {
++            "OPENROUTER_API_KEY": "env-key",
++            "DEFAULT_LLM_MODEL": "google/gemini-pro-1.5"
++        }):
++            client = OpenRouterClient()
++
++            assert client.config.api_key == "env-key"
++            assert client.config.default_model == "google/gemini-pro-1.5"
++
++    def test_init_without_api_key(self):
++        """Test initialization without API key shows warning."""
++        with patch.dict(os.environ, {}, clear=True):
++            # Remove any existing env var
++            os.environ.pop("OPENROUTER_API_KEY", None)
++
++            # Should not raise, but will print warning
++            client = OpenRouterClient()
++            assert client.config.api_key == ""
++
++    def test_list_models(self):
++        """Test listing available models."""
++        client = OpenRouterClient(config=OpenRouterConfig(api_key="test"))
++        models = client.list_models()
++
++        assert "anthropic/claude-3.5-sonnet" in models
++        assert "openai/gpt-4o" in models
++        assert "google/gemini-pro-1.5" in models
++
++    def test_chat_without_api_key(self):
++        """Test chat returns error when API key not configured."""
++        config = OpenRouterConfig(api_key="")
++        client = OpenRouterClient(config=config)
++
++        result = client.chat("Hello")
++
++        assert result["success"] is False
++        assert "not configured" in result["error"].lower()
++
++    def test_default_system_prompt(self):
++        """Test default system prompt contains expected content."""
++        client = OpenRouterClient(config=OpenRouterConfig(api_key="test"))
++        prompt = client._default_system_prompt()
++
++        assert "DocuMind" in prompt
++        assert "cite" in prompt.lower()
++        assert "sources" in prompt.lower()
++
++    @patch("urllib.request.urlopen")
++    def test_successful_chat_request(self, mock_urlopen):
++        """Test successful chat request."""
++        # Mock response
++        mock_response = MagicMock()
++        mock_response.read.return_value = b'''
++        {
++            "choices": [
++                {"message": {"content": "Test response"}}
++            ],
++            "model": "anthropic/claude-3.5-sonnet",
++            "usage": {"total_tokens": 100}
++        }
++        '''
++        mock_response.__enter__ = MagicMock(return_value=mock_response)
++        mock_response.__exit__ = MagicMock(return_value=False)
++        mock_urlopen.return_value = mock_response
++
++        config = OpenRouterConfig(api_key="test-key")
++        client = OpenRouterClient(config=config)
++
++        result = client.chat("Hello")
++
++        assert result["success"] is True
++        assert result["content"] == "Test response"
++
++    @patch("urllib.request.urlopen")
++    def test_chat_with_context(self, mock_urlopen):
++        """Test chat with RAG context."""
++        mock_response = MagicMock()
++        mock_response.read.return_value = b'''
++        {
++            "choices": [
++                {"message": {"content": "Context-aware response"}}
++            ],
++            "usage": {}
++        }
++        '''
++        mock_response.__enter__ = MagicMock(return_value=mock_response)
++        mock_response.__exit__ = MagicMock(return_value=False)
++        mock_urlopen.return_value = mock_response
++
++        config = OpenRouterConfig(api_key="test-key")
++        client = OpenRouterClient(config=config)
++
++        result = client.chat(
++            message="What is the vacation policy?",
++            context="Our vacation policy states employees get 15 days PTO."
++        )
++
++        assert result["success"] is True
++
++    def test_compare_models_structure(self):
++        """Test compare_models returns expected structure."""
++        config = OpenRouterConfig(api_key="")  # Will fail but structure is testable
++        client = OpenRouterClient(config=config)
++
++        # This will return errors for all models (no API key)
++        results = client.compare_models("Test query")
++
++        assert "anthropic/claude-3.5-sonnet" in results
++        assert "openai/gpt-4o" in results
++        assert "google/gemini-pro-1.5" in results
++
++
++class TestGetClient:
++    """Test the get_client convenience function."""
++
++    def test_get_client_returns_instance(self):
++        """Test get_client returns OpenRouterClient instance."""
++        client = get_client()
++        assert isinstance(client, OpenRouterClient)
++
++
++if __name__ == "__main__":
++    pytest.main([__file__, "-v"])
+-- 
+2.51.2
+

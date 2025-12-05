@@ -1,0 +1,21 @@
+# DocuMind Dependencies - Session 3
+
+# Core
+python-dotenv>=1.0.0
+
+# Testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+
+# Code Quality
+black>=23.0.0
+isort>=5.12.0
+
+# Session 4+ Dependencies (uncomment as needed)
+# supabase>=2.0.0          # Session 4
+# openai>=1.0.0            # Session 5
+# PyPDF2>=3.0.0            # Session 7
+# pdfplumber>=0.10.0       # Session 7
+# python-docx>=1.0.0       # Session 7
+# pandas>=2.0.0            # Session 7
+# ragas>=0.1.0             # Session 10

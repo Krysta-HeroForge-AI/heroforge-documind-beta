@@ -52,3 +52,5 @@ yarn-error.log*
 *.tmp
 .temp/
 tmp/
+.coverage
+.pytest_cache/
